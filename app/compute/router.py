@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from app.compute.schemas import BatchOperation, CancelRequest, PriorityRequest, QuotaSet, RetryRequest, TaskClaim, TaskFailure, TaskResult, TaskSubmit, TemplateCreate
+from app.compute.schemas import BatchOperation, CancelAck, CancelRequest, PriorityRequest, QuotaSet, RetryRequest, TaskClaim, TaskFailure, TaskResult, TaskSubmit, TemplateCreate
 from app.compute.service import ComputeOperationsService
 
 router = APIRouter(prefix="/api/compute", tags=["科学计算任务运营"])
@@ -54,7 +54,7 @@ def heartbeat(task_id: int, payload: TaskClaim):
 
 @router.post("/tasks/{task_id}/complete")
 def complete_task(task_id: int, payload: TaskResult):
-    return service().complete(task_id, payload.worker_id, payload.result, payload.metrics)
+    return service().complete(task_id, payload.worker_id, payload.result, payload.metrics, payload.passed)
 
 
 @router.post("/tasks/{task_id}/fail")
@@ -64,7 +64,12 @@ def fail_task(task_id: int, payload: TaskFailure):
 
 @router.post("/tasks/{task_id}/cancel")
 def cancel_task(task_id: int, payload: CancelRequest):
-    return service().cancel(task_id, payload.actor, payload.reason)
+    return service().cancel(task_id, payload.actor, payload.reason, request_key=payload.idempotency_key, ack_timeout_seconds=payload.ack_timeout_seconds)
+
+
+@router.post("/tasks/{task_id}/cancel/acknowledge")
+def acknowledge_cancel(task_id: int, payload: CancelAck):
+    return service().acknowledge_cancel(task_id, payload.worker_id, payload.request_key)
 
 
 @router.post("/tasks/{task_id}/retry")

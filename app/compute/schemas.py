@@ -42,6 +42,12 @@ class TaskResult(BaseModel):
     worker_id: str = Field(min_length=1, max_length=120)
     result: dict[str, Any]
     metrics: dict[str, Any] = Field(default_factory=dict)
+    passed: bool = True
+
+
+class CancelAck(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=120)
+    request_key: str = Field(default="", max_length=160)
 
 
 class TaskFailure(BaseModel):
@@ -54,6 +60,8 @@ class TaskFailure(BaseModel):
 class CancelRequest(BaseModel):
     actor: str = Field(min_length=1, max_length=120)
     reason: str = Field(min_length=2, max_length=1000)
+    idempotency_key: str = Field(default="", max_length=160)
+    ack_timeout_seconds: int = Field(default=30, ge=1, le=3600)
 
 
 class RetryRequest(BaseModel):

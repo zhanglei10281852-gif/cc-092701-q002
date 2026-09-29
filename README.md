@@ -64,3 +64,16 @@ tools/              本地维护脚本
 ## 数据一致性
 
 SQLite 连接启用外键、WAL 和忙等待策略。提交、领取、回执和人工干预在即时事务中完成；租约、配额与结果版本使用可注入时钟，便于复现跨日和恢复边界。会话令牌只保存摘要，审计与人工干预记录不会写入明文密码或令牌。
+
+## 取消请求的确认与超时收敛
+
+学员退出等取消请求具备明确的确认与超时收敛路径：
+
+- `POST /api/compute/tasks/{id}/cancel`：值班老师发起取消。排队任务立即转为 `cancelled` 并释放排队配额；运行中任务转为 `cancel_requested`，记录发起人、发起时刻与确认截止时刻（`ack_timeout_seconds`，默认 30 秒），运行配额在确认前保持占用。
+- `POST /api/compute/tasks/{id}/cancel/acknowledge`：持有租约的工作者确认取消，立即释放运行配额并收敛为 `cancelled`。取消挂起后心跳、成功/失败回报均被拒绝（停止后续普通回报）。
+- `POST /api/compute/recovery/expired-leases`：工作者在确认时限内未应答（确认超时）或租约已过期（失联）时，恢复程序代为结束，终态仍为 `cancelled`，运行配额释放，确认者记录为 `recovery-worker`。
+- 取消与合格成绩竞争时以先持久化者为准：取消先到则迟到成绩落 `result_rejected` 干预记录但不生成结果版本，终态保持取消；成绩先到则取消请求被拒，合格终态保留。
+- 取消请求支持 `idempotency_key`，重复发起、重复确认均返回首次处理结果（含首次生效时刻与释放的配额），不产生新的干预记录。
+
+`GET /api/compute/task-details/{id}` 的 `cancel_requests` 与接口响应中的 `cancellation` 字段给出相同结论：谁发起（`requested_by`/`requested_at`）、谁确认（`acknowledged_by`/`acknowledged_at`）、何时生效（`effective_at`）、释放了哪项配额（`released_quota`：`queued` 或 `running`）。
+

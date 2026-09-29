@@ -74,6 +74,31 @@ class ComputeRepository:
     def result_versions(self, task_id: int) -> list[dict[str, Any]]:
         return [dict(row) for row in self.connection.execute("SELECT * FROM compute_results WHERE task_id=? ORDER BY version", (task_id,)).fetchall()]
 
+    def cancel_request_by_idempotency(self, key: str) -> sqlite3.Row | None:
+        return self.connection.execute("SELECT * FROM compute_cancel_requests WHERE idempotency_key=?", (key,)).fetchone()
+
+    def cancel_request(self, task_id: int) -> sqlite3.Row | None:
+        return self.connection.execute("SELECT * FROM compute_cancel_requests WHERE task_id=? ORDER BY id DESC LIMIT 1", (task_id,)).fetchone()
+
+    def pending_cancel_requests(self, now: str) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            "SELECT * FROM compute_cancel_requests WHERE status='pending' AND deadline_at IS NOT NULL AND deadline_at<=? ORDER BY id",
+            (now,),
+        ).fetchall()
+
+    def create_cancel_request(self, *, task_id: int, idempotency_key: str, requested_by: str, requested_at: str, deadline_at: str | None, now: str) -> dict[str, Any]:
+        cursor = self.connection.execute(
+            "INSERT INTO compute_cancel_requests(task_id,idempotency_key,requested_by,requested_at,deadline_at,status,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?)",
+            (task_id, idempotency_key, requested_by, requested_at, deadline_at, now, now),
+        )
+        return dict(self.connection.execute("SELECT * FROM compute_cancel_requests WHERE id=?", (cursor.lastrowid,)).fetchone())
+
+    def settle_cancel_request(self, request_id: int, *, status: str, acknowledged_by: str, acknowledged_at: str, effective_at: str | None, released_quota: str, note: str, now: str) -> None:
+        self.connection.execute(
+            "UPDATE compute_cancel_requests SET status=?,acknowledged_by=?,acknowledged_at=?,effective_at=?,released_quota=?,note=?,updated_at=? WHERE id=?",
+            (status, acknowledged_by, acknowledged_at, effective_at, released_quota, note[:500], now, request_id),
+        )
+
     def interventions(self, task_id: int) -> list[dict[str, Any]]:
         return [dict(row) for row in self.connection.execute("SELECT * FROM compute_interventions WHERE task_id=? ORDER BY id", (task_id,)).fetchall()]
 

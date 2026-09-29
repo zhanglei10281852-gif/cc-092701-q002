@@ -261,6 +261,12 @@ CREATE TABLE IF NOT EXISTS compute_tasks (
     current_result_version INTEGER,
     last_error_code TEXT NOT NULL DEFAULT '',
     last_error_message TEXT NOT NULL DEFAULT '',
+    cancel_requested_by TEXT NOT NULL DEFAULT '',
+    cancel_requested_at TEXT NOT NULL DEFAULT '',
+    cancel_ack_deadline TEXT NOT NULL DEFAULT '',
+    cancel_acknowledged_by TEXT NOT NULL DEFAULT '',
+    cancel_acknowledged_at TEXT NOT NULL DEFAULT '',
+    cancel_effective_at TEXT NOT NULL DEFAULT '',
     version INTEGER NOT NULL DEFAULT 1,
     started_at TEXT,
     finished_at TEXT,
@@ -270,6 +276,24 @@ CREATE TABLE IF NOT EXISTS compute_tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_compute_tasks_queue ON compute_tasks(status,priority DESC,available_at,created_at);
 CREATE INDEX IF NOT EXISTS idx_compute_tasks_owner ON compute_tasks(requested_by,status,created_at);
+CREATE TABLE IF NOT EXISTS compute_cancel_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES compute_tasks(id) ON DELETE CASCADE,
+    idempotency_key TEXT NOT NULL DEFAULT '',
+    requested_by TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    deadline_at TEXT,
+    status TEXT NOT NULL CHECK(status IN ('pending','accepted','rejected','superseded')),
+    acknowledged_by TEXT NOT NULL DEFAULT '',
+    acknowledged_at TEXT NOT NULL DEFAULT '',
+    effective_at TEXT,
+    released_quota TEXT NOT NULL DEFAULT '' CHECK(released_quota IN ('','queued','running')),
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_compute_cancel_requests_key ON compute_cancel_requests(idempotency_key) WHERE idempotency_key<>'';
+CREATE INDEX IF NOT EXISTS idx_compute_cancel_requests_task ON compute_cancel_requests(task_id,id);
 CREATE TABLE IF NOT EXISTS compute_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id INTEGER NOT NULL REFERENCES compute_tasks(id) ON DELETE CASCADE,
@@ -359,10 +383,26 @@ def transaction(*, immediate: bool = False) -> Iterator[sqlite3.Connection]:
         connection.commit()
 
 
+def _ensure_compute_columns(connection: sqlite3.Connection) -> None:
+    existing = {row["name"] for row in connection.execute("PRAGMA table_info(compute_tasks)").fetchall()}
+    additions = {
+        "cancel_requested_by": "TEXT NOT NULL DEFAULT ''",
+        "cancel_requested_at": "TEXT NOT NULL DEFAULT ''",
+        "cancel_ack_deadline": "TEXT NOT NULL DEFAULT ''",
+        "cancel_acknowledged_by": "TEXT NOT NULL DEFAULT ''",
+        "cancel_acknowledged_at": "TEXT NOT NULL DEFAULT ''",
+        "cancel_effective_at": "TEXT NOT NULL DEFAULT ''",
+    }
+    for name, declaration in additions.items():
+        if name not in existing:
+            connection.execute(f"ALTER TABLE compute_tasks ADD COLUMN {name} {declaration}")
+
+
 def init_db() -> None:
     now = to_storage(utc_now())
     with transaction(immediate=True) as connection:
         connection.executescript(SCHEMA)
+        _ensure_compute_columns(connection)
         for code, name, resource, action in PERMISSIONS:
             connection.execute(
                 "INSERT OR IGNORE INTO permissions(code,name,resource,action) VALUES(?,?,?,?)",
