@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
-from app.compute.schemas import BatchOperation, CancelRequest, PriorityRequest, QuotaSet, RetryRequest, TaskClaim, TaskFailure, TaskResult, TaskSubmit, TemplateCreate
+from app.compute.schemas import BatchOperation, CancelConfirm, CancelRequest, PriorityRequest, QuotaSet, RetryRequest, TaskClaim, TaskFailure, TaskResult, TaskSubmit, TemplateCreate
 from app.compute.service import ComputeOperationsService
 
 router = APIRouter(prefix="/api/compute", tags=["科学计算任务运营"])
@@ -64,7 +64,12 @@ def fail_task(task_id: int, payload: TaskFailure):
 
 @router.post("/tasks/{task_id}/cancel")
 def cancel_task(task_id: int, payload: CancelRequest):
-    return service().cancel(task_id, payload.actor, payload.reason)
+    return service().cancel(task_id, payload.actor, payload.reason, confirm_timeout_seconds=payload.confirm_timeout_seconds)
+
+
+@router.post("/tasks/{task_id}/cancel/confirm")
+def confirm_cancel_task(task_id: int, payload: CancelConfirm):
+    return service().confirm_cancel(task_id, payload.worker_id)
 
 
 @router.post("/tasks/{task_id}/retry")

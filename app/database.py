@@ -293,6 +293,26 @@ CREATE TABLE IF NOT EXISTS compute_interventions (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_compute_interventions_task ON compute_interventions(task_id,id);
+CREATE TABLE IF NOT EXISTS compute_cancel_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES compute_tasks(id) ON DELETE CASCADE,
+    requested_by TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    confirm_deadline TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','confirmed','timeout_closed','rejected')),
+    resolution_path TEXT NOT NULL DEFAULT '',
+    confirmed_by TEXT NOT NULL DEFAULT '',
+    confirmed_at TEXT,
+    effective_at TEXT,
+    released_quota_type TEXT NOT NULL DEFAULT '',
+    released_subject_type TEXT NOT NULL DEFAULT '',
+    released_subject_key TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_compute_cancel_task ON compute_cancel_requests(task_id,id);
+CREATE INDEX IF NOT EXISTS idx_compute_cancel_pending ON compute_cancel_requests(status,confirm_deadline);
 '''
 
 PERMISSIONS = [

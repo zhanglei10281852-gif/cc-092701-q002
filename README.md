@@ -64,3 +64,15 @@ tools/              本地维护脚本
 ## 数据一致性
 
 SQLite 连接启用外键、WAL 和忙等待策略。提交、领取、回执和人工干预在即时事务中完成；租约、配额与结果版本使用可注入时钟，便于复现跨日和恢复边界。会话令牌只保存摘要，审计与人工干预记录不会写入明文密码或令牌。
+
+## 取消请求的确认与超时收敛
+
+运行中的实训任务被申请退出时，取消不会立即静默生效，而是进入可复核的两阶段流程：
+
+1. **发起**：`POST /api/compute/tasks/{id}/cancel` 由值班老师发起。排队任务立即取消并释放排队名额；运行中任务进入 `cancel_requested`，普通回报通道（成绩、失败、心跳）随即关闭，任务在 `compute_cancel_requests` 中登记发起人、原因与确认截止时间（`confirm_timeout_seconds`，默认 120 秒）。
+2. **工作者确认**：`POST /api/compute/tasks/{id}/cancel/confirm` 仅允许持有租约的工作者调用，确认后任务变为 `cancelled`、释放该用户的运行名额，记录确认者与生效时间。
+3. **超时收敛**：工作者失联或未在截止前确认时，`POST /api/compute/recovery/expired-leases` 代为结束，终态仍为 `cancelled`，释放运行名额，并以 `recovery_timeout` 路径留痕，名额不会再被长期占用。
+
+终态唯一且有依据：取消请求与合格成绩竞争时，以固定时钟比较生效时刻——严格先到者成为唯一终态；同一时刻到达按“取消优先”收敛，未落定为终态的成绩不保留结果版本。取消、确认与迟到回报均幂等，重复操作回到首次处理结果（同一 `cancel_request_id`）。
+
+接口返回与 `GET /api/compute/task-details/{id}` 历史记录共用同一份结论（`cancel_resolution`），可区分**谁发起**（`requested_by`）、**谁确认**（`confirmed_by`，恢复程序代为结束时为恢复执行者）、**何时生效**（`effective_at`）以及**释放了哪项配额**（`released_quota`：`queued_slot` 或 `running_slot`，含配额主体）。收敛路径取值：`immediate`、`worker_confirmed`、`recovery_timeout`、`simultaneous_cancel_priority`、`result_first`（成绩先生效，取消被否决）。

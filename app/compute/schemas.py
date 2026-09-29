@@ -54,6 +54,11 @@ class TaskFailure(BaseModel):
 class CancelRequest(BaseModel):
     actor: str = Field(min_length=1, max_length=120)
     reason: str = Field(min_length=2, max_length=1000)
+    confirm_timeout_seconds: int = Field(default=120, ge=1, le=3600)
+
+
+class CancelConfirm(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=120)
 
 
 class RetryRequest(BaseModel):

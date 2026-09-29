@@ -83,6 +83,46 @@ class ComputeRepository:
             (task_id, actor, action, reason, json.dumps(before, ensure_ascii=False, sort_keys=True), json.dumps(after, ensure_ascii=False, sort_keys=True), batch_key, now),
         )
 
+    def list_cancel_requests(self, task_id: int) -> list[sqlite3.Row]:
+        return self.connection.execute("SELECT * FROM compute_cancel_requests WHERE task_id=? ORDER BY id", (task_id,)).fetchall()
+
+    def latest_cancel_request(self, task_id: int) -> sqlite3.Row | None:
+        return self.connection.execute("SELECT * FROM compute_cancel_requests WHERE task_id=? ORDER BY id DESC LIMIT 1", (task_id,)).fetchone()
+
+    def create_cancel_request(
+        self, *, task_id: int, requested_by: str, reason: str, requested_at: str, confirm_deadline: str, now: str,
+    ) -> dict[str, Any]:
+        cursor = self.connection.execute(
+            "INSERT INTO compute_cancel_requests(task_id,requested_by,reason,requested_at,confirm_deadline,status,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,'pending',?,?)",
+            (task_id, requested_by, reason, requested_at, confirm_deadline, now, now),
+        )
+        return dict(self.connection.execute("SELECT * FROM compute_cancel_requests WHERE id=?", (cursor.lastrowid,)).fetchone())
+
+    def resolve_cancel_request(
+        self, *, request_id: int, status: str, resolution_path: str, confirmed_by: str, confirmed_at: str | None,
+        effective_at: str, released_quota_type: str, released_subject_type: str, released_subject_key: str, now: str,
+    ) -> None:
+        self.connection.execute(
+            "UPDATE compute_cancel_requests SET status=?,resolution_path=?,confirmed_by=?,confirmed_at=?,effective_at=?,"
+            "released_quota_type=?,released_subject_type=?,released_subject_key=?,updated_at=? WHERE id=?",
+            (status, resolution_path, confirmed_by, confirmed_at, effective_at, released_quota_type, released_subject_type,
+             released_subject_key, now, request_id),
+        )
+
+    def cancel_requests_due(self, now: str) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            "SELECT cr.* FROM compute_cancel_requests cr JOIN compute_tasks t ON t.id=cr.task_id "
+            "WHERE cr.status='pending' AND cr.confirm_deadline<=? AND t.status='cancel_requested' ORDER BY cr.id",
+            (now,),
+        ).fetchall()
+
+    def reject_cancel_request(self, *, request_id: int, resolution_path: str, confirmed_by: str, now: str) -> None:
+        self.connection.execute(
+            "UPDATE compute_cancel_requests SET status='rejected',resolution_path=?,confirmed_by=?,updated_at=? WHERE id=?",
+            (resolution_path, confirmed_by, now, request_id),
+        )
+
     def list_tasks(self, *, status: str | None, project_code: str | None, requested_by: str | None, limit: int) -> list[dict[str, Any]]:
         clauses: list[str] = []
         values: list[Any] = []
